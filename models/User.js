@@ -19,10 +19,18 @@ const userSchema = new mongoose.Schema({
         required: true,
         minlength: 8,
     },
+    image: {
+        type: String,
+        default: 'default_user.jpg'
+    },
     role: {
         type: String,
         enum: ['admin', 'user'],
         default: 'user'
+    },
+    isBlocked: {
+        type: Boolean,
+        default: false
     }
 })
 

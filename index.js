@@ -2,7 +2,6 @@ const express = require('express')
 const connectDB = require('./mongodb/connectDB')
 const User = require('./models/User')
 const app = express()
-// const bcrypt = require('bcrypt');
 const bcrypt = require('bcryptjs');
 const port = process.env.PORT || 3000
 const cors = require('cors')
@@ -14,12 +13,16 @@ const multer = require('multer');
 const Product = require('./models/Product');
 const Categories = require('./models/Category');
 const Category = require('./models/Category');
+const userRouter = require('./routers/UserRouter');
+const SearchRouter = require('./routers/SearchBusRouter');
+const ReviewRouterClint = require('./routers/ReviewRouter');
+const Reservation = require('./models/Reservation');
+const Chairs = require('./models/ConfirmPayment');
 require('dotenv').config();
-
+const stripe = require('stripe')('sk_test_51PDqAJP7DuJ1bxg98QMZ7sMJtpg3SxWCzeGcqAk7XIs4g2tQuz1YSKQRmqf1o9UdpZjDqhAfs6FIrLNCYn4GQ9iE004h3sBMlP');
 
 
 const secretKey = 'your-secret-key';
-
 
 // App configuration  
 app.use(express.json())
@@ -27,9 +30,10 @@ app.use(bodyParser.json());
 
 const corsOptions = {
     origin: ['https://bus-mkyx.onrender.com', 'http://localhost:5173'],
-    methods: ['GET', 'POST', 'PUT', 'DELETE'], 
+    // origin: 'http://localhost:5173',
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
     credentials: true,
-  };
+};
 
 app.use(cors(corsOptions));
 
@@ -50,6 +54,14 @@ const storage = multer.diskStorage({
 })
 
 const upload = multer({ storage });
+
+
+
+// app routers 
+app.use('/api', userRouter)
+app.use('/api', SearchRouter)
+app.use('/api', ReviewRouterClint)
+
 
 
 // Route for creating a new user
@@ -73,6 +85,24 @@ app.post('/api/register', async (req, res) => {
     user.save().then(user => res.json({ user }))
 })
 
+// Update user 
+app.put('/api/user/:id', upload.single('image'), async (req, res) => {
+    const { name, email } = req.body
+    const { id } = req.params
+    const imagePath = req.file ? req.file.path : null;
+
+    try {
+        const uploadeData = { name, email }
+        if (imagePath) {
+            uploadeData.image = imagePath
+        }
+        const user = await User.findByIdAndUpdate(id, uploadeData, { new: true });
+        res.status(200).json(user)
+    } catch (error) {
+        console.log(error);
+    }
+})
+
 
 // route for Login user#
 app.post('/api/login', async (req, res) => {
@@ -83,13 +113,17 @@ app.post('/api/login', async (req, res) => {
             return res.status(404).send({ message: 'User not found' })
         }
 
+        if (user.isBlocked) {
+            return res.status(403).send('User is blocked');
+        }
+
         // Compare password
         const IsPasswordValid = await bcrypt.compareSync(password, user.password)
         if (!IsPasswordValid) {
             return res.status(400).json({ message: 'Invalid credentials' });
         }
 
-        const token = jwt.sign({ id: user._id, role: user.role }, secretKey, { expiresIn: '1h' });
+        const token = jwt.sign({ id: user._id, role: user.role }, secretKey, { expiresIn: '5h' });
         res.cookie('token', token, { httpOnly: true, secure: false, sameSite: 'None', role: user.role });
 
         console.log('Login successful, token issued');
@@ -129,6 +163,63 @@ app.get('/api/user', async (req, res) => {
 
     } catch (error) {
         console.error('Error fetching user data:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+});
+
+
+// Get All Users
+app.get('/api/users', async (req, res) => {
+    try {
+        const users = await User.find();
+        res.status(200).json(users);
+    } catch (error) {
+        console.error('Error fetching users:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+});
+
+// DELETE User
+app.delete('/api/user/:id', async (req, res) => {
+    try {
+        const user = await User.findByIdAndDelete(req.params.id);
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+        res.status(200).json({ message: 'User deleted successfully' });
+    } catch (error) {
+        console.error('Error deleting user:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+});
+
+// Block User
+app.put('/api/user/block/:id', async (req, res) => {
+    try {
+        const user = await User.findById(req.params.id);
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+        user.isBlocked = !user.isBlocked;
+        await user.save();
+
+        res.status(200).json({ message: 'User blocked successfully' });
+    } catch (error) {
+        console.error('Error blocking user:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+});
+
+
+// Search Users
+app.post('/api/users', async (req, res) => {
+    const { email } = req.body
+    console.log(email);
+    try {
+        const users = await User.find({ email });
+        res.status(200).json(users);
+    } catch (error) {
+        console.error('Error fetching users:', error);
         res.status(500).json({ message: 'Server error' });
     }
 });
@@ -237,9 +328,10 @@ app.put('/api/category/update/:id', upload.single('image'), async (req, res) => 
     }
 });
 
+
 // Add Products 
 app.post('/api/products', upload.single('image'), async (req, res) => {
-    const { title, description, price, category, quantity, image, date } = req.body
+    const { title, description, form, to, chairAll, price, category, quantity, inTime, outTime, busNumber, image, date } = req.body
     if (!req.file) {
         return res.status(400).send({ message: 'No image provided' });
     }
@@ -247,13 +339,21 @@ app.post('/api/products', upload.single('image'), async (req, res) => {
 
     const product = new Product({
         title,
+        date,
         category,
         description,
         price,
         quantity,
+        // chairAll,
         image: imagePath,
-        date: new Date().toDateString(),
-        time: new Date().toLocaleTimeString()
+        inTime: inTime,
+        outTime: outTime,
+        busNumber: busNumber,
+        form,
+        to,
+
+        // date: new Date().toDateString(),
+        // time: new Date().toLocaleTimeString()
     });
     product.save().then(product => res.json(product))
 })
@@ -274,6 +374,7 @@ app.delete('/api/product/delete/:id', (req, res) => {
 })
 
 // View the product
+
 
 app.get('/api/product/:id', (req, res) => {
     Product.findById(req.params.id)
@@ -306,24 +407,195 @@ app.put('/api/product/update/:id', upload.single('image'), (req, res) => {
         updatedProduct.quantity = req.body.quantity;
     }
 
+    if (req.body.inTime) {
+        updatedProduct.inTime = req.body.inTime;
+    }
+
+    if (req.body.outTime) {
+        updatedProduct.outTime = req.body.outTime;
+    }
+    if (req.body.form) {
+        updatedProduct.form = req.body.form;
+    }
+    if (req.body.to) {
+        updatedProduct.to = req.body.to;
+    }
+    if (req.body.category) {
+        updatedProduct.category = req.body.category;
+    }
+    if (req.body.date) {
+        updatedProduct.date = req.body.date;
+    }
+
+
     Product.findByIdAndUpdate(req.params.id, updatedProduct, { new: true })
         .then(product => res.json(product))
         .catch(err => res.status(400).json('Error:'))
+
+});
+
+// update Chair 
+app.put('/api/product/AddChair/update/:productId/chair/:chairId', (req, res) => {
+    Product.findOneAndUpdate(
+        { _id: req.params.productId, 'chairAll._id': req.params.chairId },
+        {
+            $set: { 'chairAll.$.chair': req.body.chair }
+        },
+        { new: true }
+    )
+        .then(product => {
+            if (!product) {
+                return res.status(404).json({ error: 'Chair not found' });
+            }
+            console.log('Updated Product:', product);
+            res.json(product);
+        })
+        .catch(err => {
+            console.log('Error:', err);
+            res.status(400).json('Error: ' + err);
+        });
 });
 
 
 
 
 
+// reservation
+
+app.post('/api/reservations', (req, res) => {
+    const { name, phone, productId, chair, lengthChairs, userId, totalPrice, email, address, busNumber, from, to, outTime, dateNow, inTime, date } = req.body;
+
+    try {
+        const newReservation = new Reservation({
+            name,
+            phone,
+            email,
+            busNumber,
+            inTime,
+            outTime,
+            from,
+            to,
+            date,
+            dateNow,
+            address,
+            chair,
+            productId,
+            userId,
+            totalPrice,
+            lengthChairs,
+            productId,
+        });
+        // console.log(newReservation)
+        newReservation.save()
+        return res.status(201).json(newReservation)
+
+    } catch (error) {
+
+        console.error('Error saving reservation:', error)
+        res.status(500).json({ message: 'Server error' })
+    }
+})
+
+app.get('/api/reservations', (req, res) => {
+    Reservation.find()
+        .then(reservations => res.json(reservations))
+        .catch(err => res.status(400).json('Error:' + err));
+})
 
 
 
 
+// Add Stripe 
+app.post('/create-payment-intent', async (req, res) => {
+    const { amount, name, productId, lengthChairs, currency, items, customer, email, inTime, outTime, date, to, from } = req.body;
+    try {
+        // Create paymentIntent
+        const paymentIntent = await stripe.paymentIntents.create({
+            amount: amount * 100,
+            currency,
+            payment_method_types: ['card'],
+            metadata: {
+                items: JSON.stringify(items),
+                customer,
+                email,
+            },
+        });
+
+
+        // Set Data For Payment
+        const newChair = new Chairs({
+            amount,
+            currency,
+            items,
+            customer,
+            email,
+            inTime,
+            outTime,
+            date,
+            to,
+            from,
+            name,
+            paymentIntentId: paymentIntent.id,
+            lengthChairs,
+            productId,
+        })
+        newChair.save()
+        console.log(newChair)
+        res.status(200).json({ clientSecret: paymentIntent.client_secret, payload: newChair });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.put('/api/UpdateChair/update/:productId/chair/:chairId', (req, res) => {
+    console.log('Product ID:', req.params.productId);
+    console.log('Chair ID:', req.params.chairId);
+    console.log('Request Body:', req.body);
+
+    const { productId, chairId } = req.params;
+
+    Chairs.findOneAndUpdate(
+        { _id: productId, 'items.chairId': chairId }, // التأكد من مطابقة `productId` و `chairId`
+        {
+            $set: { 'items.$.status': req.body.chair } // تحديث حالة الكرسي
+        },
+        { new: true } // إرجاع المنتج المحدث
+    )
+        .then(product => {
+            if (!product) {
+                return res.status(404).json({ error: 'Chair not found' });
+            }
+            console.log('Updated Product:', product);
+            res.json(product);
+        })
+        .catch(err => {
+            console.log('Error:', err);
+            res.status(400).json('Error: ' + err);
+        });
+});
+
+
+
+// Delete payment
+app.delete('/api/payment/:id', (req, res) => {
+    Chairs.findByIdAndDelete(req.params.id)
+        .then(() => res.json('Payment deleted.'))
+        .catch(err => res.status(400).json('Error:' + err));
+})
+
+
+// get payment 
+app.get('/api/payment', async (req, res) => {
+    Chairs.find()
+        .then(payment => res.json(payment))
+        .catch(err => res.status(400).json('Error:' + err));
+})
 
 
 app.get('/', (req, res) => {
     res.send('Hello World!')
 })
+
 
 app.listen(port, () => {
     console.log(`Example app listening on port  http://localhost:${port}`)
