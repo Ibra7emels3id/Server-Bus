@@ -555,11 +555,11 @@ app.put('/api/UpdateChair/update/:productId/chair/:chairId', (req, res) => {
     const { productId, chairId } = req.params;
 
     Chairs.findOneAndUpdate(
-        { _id: productId, 'items.chairId': chairId }, // التأكد من مطابقة `productId` و `chairId`
+        { _id: productId, 'items.chairId': chairId },
         {
-            $set: { 'items.$.status': req.body.chair } // تحديث حالة الكرسي
+            $set: { 'items.$.status': req.body.chair } 
         },
-        { new: true } // إرجاع المنتج المحدث
+        { new: true } 
     )
         .then(product => {
             if (!product) {
