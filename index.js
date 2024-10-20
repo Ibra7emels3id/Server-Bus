@@ -566,7 +566,7 @@ app.put('/api/UpdateChair/update/:productId/chair/:chairId', (req, res) => {
                 return res.status(404).json({ error: 'Chair not found' });
             }
             console.log('Updated Product:', product);
-            res.json(product);
+            res.status(200).json(product);
         })
         .catch(err => {
             console.log('Error:', err);
