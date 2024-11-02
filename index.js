@@ -29,8 +29,8 @@ app.use(express.json())
 app.use(bodyParser.json());
 
 const corsOptions = {
-    // origin: ['https://bus-mkyx.onrender.com'],
-    origin: 'http://localhost:5174',
+    origin: ['https://bus-mkyx.onrender.com'],
+    // origin: 'http://localhost:5174',
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
     credentials: true,
 };
