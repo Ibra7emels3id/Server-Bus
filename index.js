@@ -3,7 +3,7 @@ const connectDB = require('./mongodb/connectDB')
 const User = require('./models/User')
 const app = express()
 const bcrypt = require('bcryptjs');
-const port = process.env.PORT || 3000
+const port = process.env.PORT || 4000
 const cors = require('cors')
 const bodyParser = require('body-parser');
 const path = require('path');
@@ -29,8 +29,8 @@ app.use(express.json())
 app.use(bodyParser.json());
 
 const corsOptions = {
-    origin: ['https://bus-mkyx.onrender.com'],
-    // origin: 'http://localhost:5173',
+    // origin: ['https://bus-mkyx.onrender.com'],
+    origin: 'http://localhost:5174',
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
     credentials: true,
 };
@@ -436,6 +436,7 @@ app.put('/api/product/update/:id', upload.single('image'), (req, res) => {
 
 // update Chair 
 app.put('/api/product/AddChair/update/:productId/chair/:chairId', (req, res) => {
+    console.log({id1:req.params.productId , id2:req.params.chairId});
     Product.findOneAndUpdate(
         { _id: req.params.productId, 'chairAll._id': req.params.chairId },
         {
